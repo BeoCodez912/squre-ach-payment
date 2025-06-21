@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>Cash App ACH Payment</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script type="module" src="https://web.squarecdn.com/v1/square.js"></script>
+  <script src="https://web.squarecdn.com/v1/square.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
     input, button { padding: 10px; font-size: 16px; width: 100%; margin: 8px 0; }
@@ -35,12 +35,59 @@
   <div id="log-container"></div>
   <div id="receipt" class="hidden"></div>
 
-  <script type="module">
-    import { payments } from "https://web.squarecdn.com/v1/square.js";
-
+  <script>
     const appId = "sq0idp-MAbSiNsOdlKDeqS750J31Q";
-    const locationId = "L889B2RZ94CN5"; // Your live Square location ID
-    const backendURL = "https://squre-ach-payment.onrender.com/pay"; // Connect to backend on same domain
+    const locationId = "L889B2RZ94CN5";
+    const backendURL = "/pay"; // Calls backend route within same Node.js app
+
+    async function initSquare() {
+      if (!window.Square) {
+        alert("❌ Square SDK failed to load");
+        return;
+      }
+
+      const payments = await window.Square.payments(appId, locationId);
+      const bank = await payments.bankAccount({ redirectURL: window.location.href });
+      await bank.attach("#payment-form");
+
+      document.getElementById("tokenize-btn").onclick = async () => {
+        const cashTag = document.getElementById("cash-tag-input").value.trim();
+        if (!cashTag.startsWith("$")) {
+          alert("Please enter a valid CashTag (starting with $)");
+          return;
+        }
+
+        try {
+          const result = await bank.tokenize();
+          if (result.status === "OK") {
+            const nonce = result.token;
+            log(`🔐 Token created. Sending to backend...`);
+
+            const res = await fetch(backendURL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ nonce, cashTag })
+            });
+
+            const data = await res.json();
+            if (data.payment && data.payment.status === "COMPLETED") {
+              log("✅ Payment successful.");
+              showReceipt({
+                cashTag,
+                txId: data.payment.id,
+                status: data.payment.status
+              });
+            } else {
+              log(`❌ Payment failed: ${JSON.stringify(data.errors || data)}`);
+            }
+          } else {
+            throw new Error(result.errors?.[0]?.message || "Tokenization failed");
+          }
+        } catch (e) {
+          log(`🚫 Error: ${e.message}`);
+        }
+      };
+    }
 
     const log = (msg) => {
       const entry = document.createElement("div");
@@ -65,44 +112,7 @@
       document.getElementById("receipt").classList.add("hidden");
     };
 
-    const paymentsSdk = await payments(appId, locationId);
-    const bank = await paymentsSdk.bankAccount({ redirectURL: window.location.href });
-    await bank.attach("#payment-form");
-
-    document.getElementById("tokenize-btn").onclick = async () => {
-      const cashTag = document.getElementById("cash-tag-input").value.trim();
-      if (!cashTag.startsWith("$")) return alert("Invalid CashTag");
-
-      try {
-        const result = await bank.tokenize();
-        if (result.status === "OK") {
-          const nonce = result.token;
-          log("🔐 Token created, sending to backend...");
-
-          const res = await fetch(backendURL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nonce, cashTag })
-          });
-
-          const data = await res.json();
-          if (data.payment && data.payment.status === "COMPLETED") {
-            log("✅ Payment successful.");
-            showReceipt({
-              cashTag,
-              txId: data.payment.id,
-              status: data.payment.status
-            });
-          } else {
-            log("❌ Payment failed.");
-          }
-        } else {
-          throw new Error(result.errors?.[0]?.message || "Tokenization failed");
-        }
-      } catch (e) {
-        log("🚫 Error: " + e.message);
-      }
-    };
+    window.onload = initSquare;
   </script>
 </body>
 </html>
