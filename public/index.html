@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cash App ACH Payment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script type="module" src="https://web.squarecdn.com/v1/square.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
+    input, button { padding: 10px; font-size: 16px; width: 100%; margin: 8px 0; }
+    #log-container, #receipt {
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-top: 15px;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+    .hidden { display: none; }
+    h2 { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <h2>Pay $10 via Cash App ACH</h2>
+
+  <label for="cash-tag-input">CashTag</label>
+  <input type="text" id="cash-tag-input" placeholder="$yourcashtag" />
+
+  <div id="payment-form"></div>
+
+  <button id="tokenize-btn">Submit ACH Payment</button>
+  <button id="clear-log">Clear Log</button>
+
+  <div id="log-container"></div>
+  <div id="receipt" class="hidden"></div>
+
+  <script type="module">
+    import { payments } from "https://web.squarecdn.com/v1/square.js";
+
+    const appId = "sq0idp-MAbSiNsOdlKDeqS750J31Q";
+    const locationId = "L889B2RZ94CN5"; // Your live Square location ID
+    const backendURL = "/pay"; // Connect to backend on same domain
+
+    const log = (msg) => {
+      const entry = document.createElement("div");
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      document.getElementById("log-container").appendChild(entry);
+    };
+
+    const showReceipt = ({ cashTag, txId, status }) => {
+      const box = document.getElementById("receipt");
+      box.classList.remove("hidden");
+      box.innerHTML = `
+        <h3>✅ Payment Receipt</h3>
+        <p><strong>To:</strong> ${cashTag}</p>
+        <p><strong>Amount:</strong> $10.00</p>
+        <p><strong>Status:</strong> ${status}</p>
+        <p><strong>Transaction ID:</strong> ${txId}</p>
+      `;
+    };
+
+    document.getElementById("clear-log").onclick = () => {
+      document.getElementById("log-container").innerHTML = "";
+      document.getElementById("receipt").classList.add("hidden");
+    };
+
+    const paymentsSdk = await payments(appId, locationId);
+    const bank = await paymentsSdk.bankAccount({ redirectURL: window.location.href });
+    await bank.attach("#payment-form");
+
+    document.getElementById("tokenize-btn").onclick = async () => {
+      const cashTag = document.getElementById("cash-tag-input").value.trim();
+      if (!cashTag.startsWith("$")) return alert("Invalid CashTag");
+
+      try {
+        const result = await bank.tokenize();
+        if (result.status === "OK") {
+          const nonce = result.token;
+          log("🔐 Token created, sending to backend...");
+
+          const res = await fetch(backendURL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nonce, cashTag })
+          });
+
+          const data = await res.json();
+          if (data.payment && data.payment.status === "COMPLETED") {
+            log("✅ Payment successful.");
+            showReceipt({
+              cashTag,
+              txId: data.payment.id,
+              status: data.payment.status
+            });
+          } else {
+            log("❌ Payment failed.");
+          }
+        } else {
+          throw new Error(result.errors?.[0]?.message || "Tokenization failed");
+        }
+      } catch (e) {
+        log("🚫 Error: " + e.message);
+      }
+    };
+  </script>
+</body>
+</html>
